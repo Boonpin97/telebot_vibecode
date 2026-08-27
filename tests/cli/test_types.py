@@ -48,6 +48,8 @@ def test_agent_request_defaults() -> None:
     assert req.append_system_prompt is None
     assert req.model_override is None
     assert req.provider_override is None
+    assert req.reasoning_effort_override is None
+    assert req.persist_target is True
     assert req.chat_id == 0
     assert req.process_label == "main"
     assert req.resume_session is None
@@ -71,11 +73,15 @@ def test_agent_request_with_overrides() -> None:
         prompt="do stuff",
         model_override="sonnet",
         provider_override="codex",
+        reasoning_effort_override="medium",
+        persist_target=False,
         chat_id=42,
         process_label="worker",
     )
     assert req.model_override == "sonnet"
     assert req.provider_override == "codex"
+    assert req.reasoning_effort_override == "medium"
+    assert req.persist_target is False
     assert req.chat_id == 42
     assert req.process_label == "worker"
 

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from ductor_bot.cli.auth import AuthResult, AuthStatus
 from ductor_bot.orchestrator.commands import (
@@ -12,6 +13,9 @@ from ductor_bot.orchestrator.commands import (
     cmd_memory,
     cmd_model,
     cmd_status,
+    cmd_temp_codex,
+    cmd_terminal,
+    cmd_usage,
 )
 from ductor_bot.orchestrator.core import Orchestrator
 from ductor_bot.session.key import SessionKey
@@ -79,6 +83,52 @@ async def test_model_same_provider_does_not_show_reset(orch: Orchestrator) -> No
     kill_mock.assert_called_once_with(1)
 
 
+async def test_cmd_temp_codex_requires_prompt(orch: Orchestrator) -> None:
+    result = await cmd_temp_codex(orch, SessionKey(chat_id=1), "/cmd")
+    assert "Usage: /cmd <prompt>" in result.text
+
+
+# -- cmd_terminal --
+
+
+async def test_terminal_requires_command(orch: Orchestrator) -> None:
+    result = await cmd_terminal(orch, SessionKey(chat_id=1), "/cmd")
+    assert "Usage: /cmd <command>" in result.text
+
+
+async def test_terminal_executes_shell_command(orch: Orchestrator) -> None:
+    proc = SimpleNamespace(
+        communicate=AsyncMock(return_value=(b"hello\n", b"")),
+        returncode=0,
+    )
+
+    with patch("ductor_bot.orchestrator.commands.asyncio.create_subprocess_shell", return_value=proc) as mock_shell:
+        result = await cmd_terminal(orch, SessionKey(chat_id=1), "/cmd echo hello")
+
+    mock_shell.assert_called_once()
+    assert mock_shell.call_args.args == ("echo hello",)
+    assert mock_shell.call_args.kwargs["stdin"] is not None
+    assert "Exit code: `0`" in result.text
+    assert "hello" in result.text
+    assert "CWD:" in result.text
+
+
+async def test_terminal_timeout_kills_process(orch: Orchestrator) -> None:
+    kill = MagicMock()
+    proc = SimpleNamespace(
+        communicate=AsyncMock(side_effect=[TimeoutError, (b"partial\n", b"")]),
+        kill=kill,
+        returncode=None,
+    )
+
+    with patch("ductor_bot.orchestrator.commands.asyncio.create_subprocess_shell", return_value=proc):
+        result = await cmd_terminal(orch, SessionKey(chat_id=1), "/cmd sleep 999")
+
+    kill.assert_called_once_with()
+    assert "Timed out after" in result.text
+    assert "partial" in result.text
+
+
 # -- cmd_status --
 
 
@@ -95,6 +145,32 @@ async def test_status_with_session(orch: Orchestrator) -> None:
         result = await cmd_status(orch, SessionKey(chat_id=1), "/status")
     assert "Session:" in result.text
     assert "Messages:" in result.text
+
+
+async def test_usage_with_session() -> None:
+    session = SimpleNamespace(
+        provider="codex",
+        model="gpt-5.2",
+        session_id="codex-session-123",
+        message_count=3,
+        total_tokens=12345,
+        total_cost_usd=0.1234,
+    )
+    sessions = SimpleNamespace(get_active=AsyncMock(return_value=session))
+    orch = SimpleNamespace(
+        _sessions=sessions,
+        _config=SimpleNamespace(max_budget_usd=None),
+        resolve_runtime_target=lambda model: (model, "claude"),
+    )
+
+    result = await cmd_usage(orch, SessionKey(chat_id=1), "/usage")
+
+    assert "Provider: codex" in result.text
+    assert "Model: gpt-5.2" in result.text
+    assert "Messages: 3" in result.text
+    assert "Tokens: 12,345" in result.text
+    assert "Cost tracked: $0.1234" in result.text
+    assert "Remaining provider credits: unavailable" in result.text
 
 
 async def test_status_prefers_session_model_over_config(orch: Orchestrator) -> None:

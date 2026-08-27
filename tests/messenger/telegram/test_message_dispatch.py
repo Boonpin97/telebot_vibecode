@@ -161,6 +161,42 @@ async def test_non_streaming_reacts_on_trigger_message_not_reply_to() -> None:
         )
 
 
+async def test_non_streaming_sends_completion_notice_after_reply() -> None:
+    bot = _make_bot()
+    message = MagicMock()
+    message.message_id = 10
+
+    orchestrator = MagicMock()
+    orchestrator.handle_message = AsyncMock(
+        return_value=OrchestratorResult(text="patched", completion_notice="Done")
+    )
+
+    dispatch = NonStreamingDispatch(
+        bot=bot,
+        orchestrator=orchestrator,
+        key=SessionKey(chat_id=1),
+        text="fix it",
+        allowed_roots=[Path("/tmp")],
+        message=message,
+        reply_to=message,
+        thread_id=99,
+    )
+
+    with (
+        patch(
+            "ductor_bot.messenger.telegram.message_dispatch.send_rich",
+            new_callable=AsyncMock,
+        ) as send_rich_mock,
+        patch("ductor_bot.messenger.telegram.message_dispatch.TypingContext") as typing_ctx,
+    ):
+        typing_ctx.return_value.__aenter__ = AsyncMock()
+        typing_ctx.return_value.__aexit__ = AsyncMock()
+        await run_non_streaming_message(dispatch)
+
+    assert [call.args[2] for call in send_rich_mock.await_args_list] == ["patched", "Done"]
+    assert send_rich_mock.await_args_list[1].args[3].thread_id == 99
+
+
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-v"]))
 
@@ -185,7 +221,7 @@ async def test_streaming_reasoning_only_still_sends_final_answer() -> None:
 
     async def _handle_streaming(*_args, **kwargs):
         await kwargs["on_reasoning_delta"]("I am thinking through the patch")
-        return OrchestratorResult(text="Final answer delivered")
+        return OrchestratorResult(text="Final answer delivered", completion_notice="Done")
 
     orch.handle_message_streaming = AsyncMock(side_effect=_handle_streaming)
 
@@ -224,8 +260,10 @@ async def test_streaming_reasoning_only_still_sends_final_answer() -> None:
         result = await run_streaming_message(dispatch)
 
     assert result == "Final answer delivered"
-    send_rich_mock.assert_awaited_once()
-    assert send_rich_mock.await_args.args[2] == "Final answer delivered"
+    assert [call.args[2] for call in send_rich_mock.await_args_list] == [
+        "Final answer delivered",
+        "Done",
+    ]
     send_files_mock.assert_not_awaited()
 
 

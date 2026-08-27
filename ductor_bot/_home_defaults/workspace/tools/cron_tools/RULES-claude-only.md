@@ -10,6 +10,7 @@ Scripts for creating, editing, listing, and removing scheduled jobs.
    - `haiku` - Fast and cost-effective
    - `sonnet` - Balanced performance (recommended)
    - `opus` - Most capable, highest quality
+   - `fable` - Newest frontier model
 
 2. **Should this job respect quiet hours?**
    - Ask: "Should this job skip execution during specific hours (e.g., at night)?"
@@ -61,7 +62,7 @@ python3 tools/cron_tools/cron_add.py \
 ```
 
 **Available parameters:**
-- `--model` - Model choice: `haiku`, `sonnet`, `opus` (optional, uses global config if omitted)
+- `--model` - Model choice: `haiku`, `sonnet`, `opus`, `fable` (optional, uses global config if omitted)
 - `--cli-parameters` - Advanced: JSON array of CLI flags (only if user explicitly requests)
 
 ### List Jobs

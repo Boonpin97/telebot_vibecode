@@ -133,15 +133,44 @@ def _build_help_text() -> str:
         t("help.header"),
         SEP,
         f"{t('help.cat_daily')}\n{_help_line('new')}\n{_help_line('stop')}\n{_help_line('interrupt')}\n{_help_line('stop_all')}\n"
-        f"{_help_line('model')}\n{_help_line('status')}\n{_help_line('memory')}",
+        f"{_help_line('cmd')}\n{_help_line('terminal')}\n{_help_line('model')}\n{_help_line('status')}\n{_help_line('usage')}\n{_help_line('memory')}",
         f"{t('help.cat_automation')}\n{_help_line('session')}\n{_help_line('tasks')}\n{_help_line('cron')}",
         f"{t('help.cat_multiagent')}\n{_help_line('agent_commands')}",
         f"{t('help.cat_browse')}\n{_help_line('where')}\n{_help_line('leave')}\n"
-        f"{_help_line('showfiles')}\n{_help_line('info')}\n{_help_line('help')}",
+        f"{_help_line('folders')}\n{_help_line('showfiles')}\n{_help_line('info')}\n{_help_line('help')}",
         f"{t('help.cat_maintenance')}\n{_help_line('diagnose')}\n{_help_line('upgrade')}\n{_help_line('restart')}",
         SEP,
         t("help.footer"),
     )
+
+
+def _list_visible_home_directories(home: Path | None = None) -> list[str]:
+    """Return non-hidden immediate directory names from *home*."""
+    root = home or Path.home()
+    directories: list[str] = []
+    for child in root.iterdir():
+        if child.name.startswith("."):
+            continue
+        try:
+            if child.is_dir():
+                directories.append(child.name)
+        except OSError:
+            logger.debug("Unable to inspect home entry: %s", child, exc_info=True)
+    return sorted(directories, key=str.casefold)
+
+
+def _build_home_folders_text(home: Path | None = None) -> str:
+    root = home or Path.home()
+    try:
+        directories = _list_visible_home_directories(root)
+    except OSError as exc:
+        return fmt("Home folders", SEP, f"Unable to read `{root}`: `{exc}`")
+
+    if not directories:
+        return fmt("Home folders", SEP, f"No non-hidden folders found in `{root}`.")
+
+    lines = [f"- `{name}/`" for name in directories]
+    return fmt("Home folders", SEP, f"`{root}`", "\n".join(lines))
 
 
 async def _cancel_task(task: asyncio.Task[None] | None) -> None:
@@ -391,9 +420,20 @@ class TelegramBot:
         r.message(Command("session", ignore_case=True))(self._on_session)
         r.message(Command("sessions", ignore_case=True))(self._on_sessions)
         r.message(Command("tasks", ignore_case=True))(self._on_tasks)
+        r.message(Command("folders", ignore_case=True))(self._on_folders)
         r.message(Command("showfiles", ignore_case=True))(self._on_showfiles)
         r.message(Command("agent_commands", ignore_case=True))(self._on_agent_commands)
-        base_cmds = ["status", "memory", "model", "cron", "diagnose", "upgrade"]
+        base_cmds = [
+            "status",
+            "usage",
+            "credits",
+            "memory",
+            "cmd",
+            "model",
+            "cron",
+            "diagnose",
+            "upgrade",
+        ]
         if self._agent_name == "main":
             base_cmds += ["agents", "agent_start", "agent_stop", "agent_restart"]
         for cmd in base_cmds:
@@ -829,6 +869,22 @@ class TelegramBot:
             ),
         )
 
+    async def _on_folders(self, message: Message) -> None:
+        """Handle /folders: list non-hidden directories in ~/."""
+        if self._is_for_others(message):
+            return
+        if self._config.group_mention_only and not self._is_addressed(message):
+            return
+        await send_rich(
+            self._bot,
+            message.chat.id,
+            _build_home_folders_text(),
+            SendRichOpts(
+                reply_to_message_id=message.message_id,
+                thread_id=get_thread_id(message),
+            ),
+        )
+
     # -- Interrupt, abort, commands, sessions ----------------------------------
 
     async def _on_interrupt(self, chat_id: int, message: Message) -> bool:
@@ -868,6 +924,9 @@ class TelegramBot:
             return True
         if text_lower.startswith("/leave"):
             await self._handle_leave(chat_id, message)
+            return True
+        if text_lower.startswith("/folders"):
+            await self._on_folders(message)
             return True
         if text_lower.startswith("/showfiles") and self._orchestrator is not None:
             await self._on_showfiles(message)

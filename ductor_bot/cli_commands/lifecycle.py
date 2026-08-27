@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import shutil
 import subprocess
 import sys
 import time
+from pathlib import Path
 from typing import NoReturn
 
 from rich.console import Console
@@ -23,13 +25,52 @@ from ductor_bot.workspace.paths import resolve_paths
 _console = Console()
 
 
+def _resolve_reexec_argv() -> list[str]:
+    """Return a stable argv for restarting the bot process."""
+    executable = Path(sys.executable)
+
+    if is_windows():
+        for name in ("pythonw.exe", "python.exe"):
+            candidate = executable.with_name(name)
+            if candidate.exists():
+                return [str(candidate), "-m", "ductor_bot"]
+
+    return [sys.executable, "-m", "ductor_bot"]
+
+
+def _unlink_with_retry(path: Path, *, retries: int = 5, delay: float = 0.2) -> None:
+    """Best-effort unlink for transient Windows file locks."""
+    for attempt in range(retries):
+        try:
+            path.unlink(missing_ok=True)
+            return
+        except PermissionError:
+            if attempt == retries - 1:
+                break
+            time.sleep(delay)
+    with contextlib.suppress(OSError):
+        path.unlink(missing_ok=True)
+
+
 def _re_exec_bot() -> NoReturn:
     """Re-exec the bot process (cross-platform).
 
     Spawns a new Python process running ``ductor_bot`` and exits the current one.
     Under a service manager the caller should ``sys.exit(EXIT_RESTART)`` instead.
     """
-    subprocess.Popen([sys.executable, "-m", "ductor_bot"])
+    argv = _resolve_reexec_argv()
+    popen_kwargs: dict[str, object] = {}
+
+    if is_windows():
+        creationflags = (
+            getattr(subprocess, "DETACHED_PROCESS", 0)
+            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        )
+        popen_kwargs["creationflags"] = creationflags
+        popen_kwargs["close_fds"] = True
+
+    subprocess.Popen(argv, **popen_kwargs)
     sys.exit(0)
 
 
@@ -62,7 +103,7 @@ def _stop_docker_container(container_name: str) -> None:
     _console.print(t_rich("lifecycle.docker_stopped"))
 
 
-def stop_bot() -> None:
+def stop_bot(*, kill_extras: bool = True) -> None:
     """Stop all running ductor instances and Docker container.
 
     1. Stop the system service (prevents Task Scheduler/systemd/launchd respawn)
@@ -89,19 +130,20 @@ def stop_bot() -> None:
         if pid is not None and _is_process_alive(pid):
             _console.print(t_rich("lifecycle.stopping_bot", pid=pid))
             _kill_and_wait(pid)
-            pid_file.unlink(missing_ok=True)
+            _unlink_with_retry(pid_file)
             _console.print(t_rich("lifecycle.bot_stopped"))
             stopped = True
         else:
-            pid_file.unlink(missing_ok=True)
+            _unlink_with_retry(pid_file)
 
     # 3. Kill all remaining ductor processes system-wide
     from ductor_bot.infra.process_tree import kill_all_ductor_processes
 
-    extra = kill_all_ductor_processes()
-    if extra:
-        _console.print(t_rich("lifecycle.killed_extra", count=extra))
-        stopped = True
+    if kill_extras:
+        extra = kill_all_ductor_processes()
+        if extra:
+            _console.print(t_rich("lifecycle.killed_extra", count=extra))
+            stopped = True
 
     if not stopped:
         _console.print(t_rich("lifecycle.no_instance"))
@@ -154,7 +196,13 @@ def start_bot(verbose: bool = False) -> None:
 
 def cmd_restart() -> None:
     """Stop and re-exec the bot."""
-    stop_bot()
+    from ductor_bot.infra.service import is_service_installed, start_service
+
+    use_service = is_service_installed()
+    stop_bot(kill_extras=not use_service)
+    if use_service:
+        start_service(_console)
+        return
     _re_exec_bot()
 
 

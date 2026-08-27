@@ -162,7 +162,7 @@ async def test_normal_sigkill_recovers_once_then_succeeds(orch: Orchestrator) ->
     assert result.text == "Recovered"
     assert mock_execute.call_count == 2
     mock_reset_provider.assert_called_once_with(
-        SessionKey(chat_id=1), provider="claude", model="opus"
+        SessionKey(chat_id=1), provider="claude", model="opus", persist_target=True
     )
 
 
@@ -179,7 +179,7 @@ async def test_normal_sigkill_recovers_once_then_asks_user_retry(orch: Orchestra
     assert result.text == "Execution was interrupted. Please send the same request again."
     assert mock_execute.call_count == 2
     mock_reset_provider.assert_called_once_with(
-        SessionKey(chat_id=1), provider="claude", model="opus"
+        SessionKey(chat_id=1), provider="claude", model="opus", persist_target=True
     )
 
 
@@ -208,7 +208,7 @@ async def test_normal_stale_session_recovery_failed_circuit_breaker(orch: Orches
     # Hard cap: one retry. Must be exactly two calls, never cascade further.
     assert mock_execute.call_count == 2
     mock_reset_provider.assert_called_once_with(
-        SessionKey(chat_id=1), provider="claude", model="opus"
+        SessionKey(chat_id=1), provider="claude", model="opus", persist_target=True
     )
 
 
@@ -403,7 +403,7 @@ async def test_streaming_sigkill_recovers_once_then_succeeds(orch: Orchestrator)
     assert result.text == "Recovered stream"
     assert mock_streaming.call_count == 2
     mock_reset_provider.assert_called_once_with(
-        SessionKey(chat_id=1), provider="claude", model="opus"
+        SessionKey(chat_id=1), provider="claude", model="opus", persist_target=True
     )
 
 
@@ -511,6 +511,7 @@ def test_finish_normal_with_stream_fallback() -> None:
     resp = AgentResponse(result="Hello", is_error=False, stream_fallback=True)
     result = _finish_normal(resp)
     assert result.text == "Hello"
+    assert result.completion_notice == "Done"
     assert result.stream_fallback is True
 
 

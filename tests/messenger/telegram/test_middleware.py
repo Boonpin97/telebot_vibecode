@@ -479,6 +479,8 @@ class TestIsQuickCommand:
         ("text", "expected"),
         [
             ("/status", True),
+            ("/usage", True),
+            ("/credits", True),
             ("/memory", True),
             ("/cron", True),
             ("/diagnose", True),
@@ -486,6 +488,8 @@ class TestIsQuickCommand:
             ("  /status  ", True),
             ("/model", True),
             ("/model sonnet", True),
+            ("/folders", True),
+            ("/folders@my_bot", True),
             ("/status@my_bot", True),
             ("/model@my_bot gpt-5.3-codex", True),
             ("/where", True),

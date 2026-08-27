@@ -27,6 +27,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Effort levels accepted by the Claude Code CLI (--effort flag).
+CLAUDE_EFFORT_LEVELS: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max")
+
 
 class ClaudeCodeCLI(BaseCLI):
     """Async wrapper around the Claude Code CLI."""
@@ -59,6 +62,8 @@ class ClaudeCodeCLI(BaseCLI):
 
         _add_opt(cmd, "--permission-mode", cfg.permission_mode)
         _add_opt(cmd, "--model", cfg.model)
+        if cfg.reasoning_effort in CLAUDE_EFFORT_LEVELS:
+            cmd += ["--effort", cfg.reasoning_effort]
         _add_opt(cmd, "--system-prompt", cfg.system_prompt)
         _add_opt(cmd, "--append-system-prompt", cfg.append_system_prompt)
         _add_opt(cmd, "--max-turns", str(cfg.max_turns) if cfg.max_turns is not None else None)

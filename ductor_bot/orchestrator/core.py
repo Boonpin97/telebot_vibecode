@@ -35,7 +35,10 @@ from ductor_bot.orchestrator.commands import (
     cmd_sessions,
     cmd_status,
     cmd_tasks,
+    cmd_temp_codex,
+    cmd_terminal,
     cmd_upgrade,
+    cmd_usage,
 )
 from ductor_bot.orchestrator.directives import parse_directives
 from ductor_bot.orchestrator.flows import (
@@ -411,6 +414,10 @@ class Orchestrator:
         # /stop is handled entirely by the Middleware abort path (before the lock)
         # and never reaches the orchestrator command registry.
         reg.register_async("/status", cmd_status)
+        reg.register_async("/usage", cmd_usage)
+        reg.register_async("/credits", cmd_usage)
+        reg.register_async("/cmd", cmd_terminal)
+        reg.register_async("/cmd ", cmd_terminal)
         reg.register_async("/model", cmd_model)
         reg.register_async("/model ", cmd_model)
         reg.register_async("/memory", cmd_memory)

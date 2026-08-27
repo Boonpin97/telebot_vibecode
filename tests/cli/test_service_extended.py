@@ -124,3 +124,20 @@ def test_make_cli_passes_gemini_api_key(tmp_path: Path) -> None:
     call_args = mock_create.call_args[0][0]
     assert call_args.provider == "gemini"
     assert call_args.gemini_api_key == "cfg-key-123"
+
+
+def test_make_cli_prefers_request_reasoning_override(tmp_path: Path) -> None:
+    svc = _make_service(tmp_path, provider="codex", default_model="gpt-5.2-codex")
+    with patch("ductor_bot.cli.service.create_cli") as mock_create:
+        mock_create.return_value = MagicMock()
+        svc._make_cli(
+            AgentRequest(
+                prompt="test",
+                provider_override="codex",
+                reasoning_effort_override="low",
+                chat_id=1,
+            )
+        )
+
+    call_args = mock_create.call_args[0][0]
+    assert call_args.reasoning_effort == "low"

@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ductor_bot.cli.auth import check_all_auth
 from ductor_bot.i18n import t
 from ductor_bot.infra.version import check_pypi, get_current_version
+from ductor_bot.orchestrator.flows import normal
 from ductor_bot.orchestrator.registry import OrchestratorResult
 from ductor_bot.orchestrator.selectors.cron_selector import cron_selector_start
 from ductor_bot.orchestrator.selectors.model_selector import model_selector_start, switch_model
@@ -24,6 +27,13 @@ if TYPE_CHECKING:
     from ductor_bot.session.key import SessionKey
 
 logger = logging.getLogger(__name__)
+
+_CMD_CODEX_MODEL = "gpt-5.4-mini"
+_CMD_CLAUDE_MODEL = "haiku"
+_CMD_REASONING = "medium"
+_TERMINAL_TIMEOUT_SECONDS = 300.0
+_TERMINAL_OUTPUT_LIMIT = 6_000
+_TERMINAL_BUFFER_LIMIT = 1_048_576
 
 
 # -- Command wrappers (registered by Orchestrator._register_commands) --
@@ -43,6 +53,12 @@ async def cmd_status(orch: Orchestrator, key: SessionKey, _text: str) -> Orchest
     return OrchestratorResult(text=await _build_status(orch, key))
 
 
+async def cmd_usage(orch: Orchestrator, key: SessionKey, _text: str) -> OrchestratorResult:
+    """Handle /usage and /credits."""
+    logger.info("Usage requested")
+    return OrchestratorResult(text=await _build_usage(orch, key))
+
+
 async def cmd_model(orch: Orchestrator, key: SessionKey, text: str) -> OrchestratorResult:
     """Handle /model [name]."""
     logger.info("Model requested")
@@ -53,6 +69,97 @@ async def cmd_model(orch: Orchestrator, key: SessionKey, text: str) -> Orchestra
     name = parts[1].strip()
     result_text = await switch_model(orch, key, name)
     return OrchestratorResult(text=result_text)
+
+
+async def cmd_temp_codex(orch: Orchestrator, key: SessionKey, text: str) -> OrchestratorResult:
+    """Handle one-turn provider-appropriate model override requests."""
+    logger.info("Temporary Codex command requested")
+    parts = text.split(None, 1)
+    if len(parts) < 2 or not parts[1].strip():
+        return OrchestratorResult(
+            text=f"Usage: /cmd <prompt>\nRuns one turn on {_CMD_CLAUDE_MODEL} (claude) or {_CMD_CODEX_MODEL} (codex) based on current provider."
+        )
+    session = await orch._sessions.get_active(key)
+    current_provider = (session.provider if session else None) or orch._config.provider
+    if current_provider == "claude":
+        model_override = _CMD_CLAUDE_MODEL
+        reasoning_override: str | None = None
+    else:
+        model_override = _CMD_CODEX_MODEL
+        reasoning_override = _CMD_REASONING
+    return await normal(
+        orch,
+        key,
+        parts[1].strip(),
+        model_override=model_override,
+        reasoning_effort_override=reasoning_override,
+        transient_target=True,
+    )
+
+
+async def cmd_terminal(_orch: Orchestrator, _key: SessionKey, text: str) -> OrchestratorResult:
+    """Handle /cmd <command>: execute a shell command on the host."""
+    logger.info("Terminal command requested")
+    parts = text.split(None, 1)
+    if len(parts) < 2 or not parts[1].strip():
+        return OrchestratorResult(text="Usage: /cmd <command>")
+
+    command = parts[1].strip()
+    cwd = _terminal_workdir()
+    started = time.monotonic()
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            command,
+            cwd=str(cwd),
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            limit=_TERMINAL_BUFFER_LIMIT,
+        )
+    except OSError as exc:
+        return OrchestratorResult(
+            text=fmt(
+                "**Terminal**",
+                SEP,
+                _terminal_command_block(command, cwd),
+                f"Failed to start command: `{exc}`",
+            ),
+        )
+
+    try:
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(
+            proc.communicate(),
+            timeout=_TERMINAL_TIMEOUT_SECONDS,
+        )
+    except TimeoutError:
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
+        stdout_bytes, stderr_bytes = await proc.communicate()
+        elapsed = time.monotonic() - started
+        return OrchestratorResult(
+            text=fmt(
+                "**Terminal**",
+                SEP,
+                _terminal_command_block(command, cwd),
+                f"Timed out after {_TERMINAL_TIMEOUT_SECONDS:.0f}s. Process was killed.",
+                _terminal_output_block("stdout", stdout_bytes),
+                _terminal_output_block("stderr", stderr_bytes),
+                f"Duration: `{elapsed:.1f}s`",
+            ),
+        )
+
+    elapsed = time.monotonic() - started
+    return OrchestratorResult(
+        text=fmt(
+            "**Terminal**",
+            SEP,
+            _terminal_command_block(command, cwd),
+            f"Exit code: `{proc.returncode}`",
+            _terminal_output_block("stdout", stdout_bytes),
+            _terminal_output_block("stderr", stderr_bytes),
+            f"Duration: `{elapsed:.1f}s`",
+        ),
+    )
 
 
 async def cmd_memory(orch: Orchestrator, _key: SessionKey, _text: str) -> OrchestratorResult:
@@ -255,6 +362,33 @@ async def cmd_diagnose(orch: Orchestrator, _key: SessionKey, _text: str) -> Orch
 # -- Helpers ------------------------------------------------------------------
 
 
+def _terminal_workdir() -> Path:
+    """Return the default working directory for /cmd commands."""
+    return Path(__file__).resolve().parents[2]
+
+
+def _terminal_command_block(command: str, cwd: Path) -> str:
+    return fmt(
+        "Command:",
+        f"```shell\n{_code_fence_safe(command)}\n```",
+        f"CWD: `{cwd}`",
+    )
+
+
+def _terminal_output_block(label: str, data: bytes) -> str:
+    text = data.decode("utf-8", errors="replace").strip()
+    if not text:
+        return f"**{label}**\n(empty)"
+    if len(text) > _TERMINAL_OUTPUT_LIMIT:
+        omitted = len(text) - _TERMINAL_OUTPUT_LIMIT
+        text = f"{text[:_TERMINAL_OUTPUT_LIMIT]}\n... truncated {omitted} chars"
+    return f"**{label}**\n```text\n{_code_fence_safe(text)}\n```"
+
+
+def _code_fence_safe(text: str) -> str:
+    return text.replace("```", "'''")
+
+
 def _build_agent_health_block(orch: Orchestrator) -> str:
     """Build the multi-agent health section for /status (main agent only)."""
     supervisor = orch._supervisor
@@ -347,6 +481,45 @@ async def _build_status(orch: Orchestrator, key: SessionKey) -> str:
     if agent_block:
         blocks += [SEP, agent_block]
     return fmt(*blocks)
+
+
+async def _build_usage(orch: Orchestrator, key: SessionKey) -> str:
+    """Build the /usage response text from locally tracked session totals."""
+    session = await orch._sessions.get_active(key)
+    if session is None:
+        model, provider = orch.resolve_runtime_target(orch._config.model)
+        usage_lines = [
+            "**Usage**",
+            SEP,
+            f"Provider: {provider}",
+            f"Model: {model}",
+            "Session: no active session",
+            "Messages: 0",
+            "Tokens: 0",
+            "Cost tracked: $0.0000",
+        ]
+    else:
+        usage_lines = [
+            "**Usage**",
+            SEP,
+            f"Provider: {session.provider}",
+            f"Model: {session.model}",
+            f"Session: `{session.session_id[:8] + '...' if session.session_id else 'new'}`",
+            f"Messages: {session.message_count}",
+            f"Tokens: {session.total_tokens:,}",
+            f"Cost tracked: ${session.total_cost_usd:.4f}",
+        ]
+
+    if orch._config.max_budget_usd is not None:
+        usage_lines.append(f"Configured turn budget: ${orch._config.max_budget_usd:.4f}")
+
+    usage_lines.extend(
+        [
+            SEP,
+            "Remaining provider credits: unavailable from the local CLI.",
+        ]
+    )
+    return fmt(*usage_lines)
 
 
 async def _read_log_tail(log_path: Path, lines: int = 50) -> str:

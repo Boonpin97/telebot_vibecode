@@ -4,7 +4,7 @@ Public API::
 
     from ductor_bot.i18n import init, t, t_rich, t_cmd, t_plural
 
-    init("de")  # once at startup
+    init("en")  # once at startup
     t("session.error", model="opus")  # chat/Markdown string
     t_rich("lifecycle.stopped")  # CLI/Rich string
     t_cmd("new")  # bot command description
@@ -21,17 +21,8 @@ logger = logging.getLogger(__name__)
 
 _store: TranslationStore | None = None
 
-# Available languages: directory name -> display name (native).
-LANGUAGES: dict[str, str] = {
-    "en": "English",
-    "de": "Deutsch",
-    "nl": "Nederlands",
-    "es": "Español",
-    "fr": "Français",
-    "id": "Bahasa Indonesia",
-    "pt": "Português",
-    "ru": "Русский",
-}
+# Available languages: directory name -> display name.
+LANGUAGES: dict[str, str] = {"en": "English"}
 
 
 def init(language: str = "en") -> None:

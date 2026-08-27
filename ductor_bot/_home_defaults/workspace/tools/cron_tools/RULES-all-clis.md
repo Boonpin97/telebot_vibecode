@@ -16,6 +16,7 @@ Scripts for creating, editing, listing, and removing scheduled jobs.
      - `haiku` - Fast and cost-effective
      - `sonnet` - Balanced performance (recommended)
      - `opus` - Most capable, highest quality
+     - `fable` - Newest frontier model
    - **If Codex:**
      - `gpt-5.4` - Latest frontier agentic coding model (recommended)
      - `gpt-5.4-mini` - Smaller, faster frontier coding model

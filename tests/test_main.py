@@ -316,6 +316,32 @@ class TestStopBot:
         with patch(f"{_LIFECYCLE}.resolve_paths", return_value=paths):
             stop_bot()
 
+    def test_stop_retries_pid_unlink_on_permission_error(self, tmp_path: Path) -> None:
+        from ductor_bot.cli_commands.lifecycle import stop_bot
+
+        paths = _make_paths(tmp_path)
+        paths.ductor_home.mkdir(parents=True)
+        pid_file = paths.ductor_home / "bot.pid"
+        pid_file.write_text("12345", encoding="utf-8")
+
+        original_unlink = Path.unlink
+        calls = {"count": 0}
+
+        def flaky_unlink(self: Path, missing_ok: bool = False) -> None:
+            if self == pid_file and calls["count"] == 0:
+                calls["count"] += 1
+                raise PermissionError("locked")
+            return original_unlink(self, missing_ok=missing_ok)
+
+        with (
+            patch(f"{_LIFECYCLE}.resolve_paths", return_value=paths),
+            patch("ductor_bot.infra.pidlock._is_process_alive", return_value=False),
+            patch.object(Path, "unlink", new=flaky_unlink),
+            patch(f"{_LIFECYCLE}.time.sleep"),
+        ):
+            stop_bot()
+        assert not pid_file.exists()
+
     def test_stop_with_docker(self, tmp_path: Path) -> None:
         from ductor_bot.cli_commands.lifecycle import stop_bot
 
@@ -435,6 +461,7 @@ class TestReExecBot:
         from ductor_bot.cli_commands.lifecycle import _re_exec_bot
 
         with (
+            patch(f"{_LIFECYCLE}.is_windows", return_value=False),
             patch(f"{_LIFECYCLE}.subprocess.Popen") as mock_popen,
             pytest.raises(SystemExit) as exc_info,
         ):
@@ -442,15 +469,41 @@ class TestReExecBot:
         mock_popen.assert_called_once_with([sys.executable, "-m", "ductor_bot"])
         assert exc_info.value.code == 0
 
-    def test_re_exec_uses_same_args_on_windows_flag(self) -> None:
+    def test_resolve_reexec_argv_prefers_pythonw_then_python_on_windows(self) -> None:
+        from ductor_bot.cli_commands.lifecycle import _resolve_reexec_argv
+
+        with (
+            patch(f"{_LIFECYCLE}.is_windows", return_value=True),
+            patch.object(
+                sys.modules[_LIFECYCLE],
+                "sys",
+                MagicMock(executable=r"C:\repo\.venv\Scripts\ductor.exe"),
+            ),
+            patch(f"{_LIFECYCLE}.Path.exists", side_effect=[True, False]),
+        ):
+            argv = _resolve_reexec_argv()
+        assert argv == [r"C:\repo\.venv\Scripts\pythonw.exe", "-m", "ductor_bot"]
+
+    def test_re_exec_uses_detached_pythonw_on_windows(self) -> None:
         from ductor_bot.cli_commands.lifecycle import _re_exec_bot
 
         with (
+            patch(f"{_LIFECYCLE}.is_windows", return_value=True),
+            patch(f"{_LIFECYCLE}._resolve_reexec_argv", return_value=["C:\\repo\\.venv\\Scripts\\pythonw.exe", "-m", "ductor_bot"]),
             patch(f"{_LIFECYCLE}.subprocess.Popen") as mock_popen,
             pytest.raises(SystemExit) as exc_info,
         ):
             _re_exec_bot()
-        mock_popen.assert_called_once_with([sys.executable, "-m", "ductor_bot"])
+        creationflags = (
+            getattr(sys.modules[_LIFECYCLE].subprocess, "DETACHED_PROCESS", 0)
+            | getattr(sys.modules[_LIFECYCLE].subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            | getattr(sys.modules[_LIFECYCLE].subprocess, "CREATE_NO_WINDOW", 0)
+        )
+        mock_popen.assert_called_once_with(
+            ["C:\\repo\\.venv\\Scripts\\pythonw.exe", "-m", "ductor_bot"],
+            creationflags=creationflags,
+            close_fds=True,
+        )
         assert exc_info.value.code == 0
 
 
@@ -799,12 +852,39 @@ class TestMainHelpers:
         from ductor_bot.cli_commands.lifecycle import cmd_restart
 
         with (
+            patch("ductor_bot.infra.service.is_service_installed", return_value=False),
             patch(f"{_LIFECYCLE}.stop_bot") as mock_stop,
             patch(f"{_LIFECYCLE}._re_exec_bot", side_effect=SystemExit),
             pytest.raises(SystemExit),
         ):
             cmd_restart()
         mock_stop.assert_called_once()
+
+    def test_cmd_restart_uses_pre_stop_service_state(self) -> None:
+        from ductor_bot.cli_commands.lifecycle import cmd_restart
+
+        with (
+            patch("ductor_bot.infra.service.is_service_installed", return_value=True),
+            patch(f"{_LIFECYCLE}.stop_bot") as mock_stop,
+            patch("ductor_bot.infra.service.start_service") as mock_start,
+            patch(f"{_LIFECYCLE}._re_exec_bot") as mock_exec,
+        ):
+            cmd_restart()
+        mock_stop.assert_called_once_with(kill_extras=False)
+        mock_start.assert_called_once()
+        mock_exec.assert_not_called()
+
+    def test_cmd_restart_non_service_keeps_aggressive_stop(self) -> None:
+        from ductor_bot.cli_commands.lifecycle import cmd_restart
+
+        with (
+            patch("ductor_bot.infra.service.is_service_installed", return_value=False),
+            patch(f"{_LIFECYCLE}.stop_bot") as mock_stop,
+            patch(f"{_LIFECYCLE}._re_exec_bot", side_effect=SystemExit),
+            pytest.raises(SystemExit),
+        ):
+            cmd_restart()
+        mock_stop.assert_called_once_with(kill_extras=True)
 
     def test_default_action_configured_starts(self) -> None:
         from ductor_bot.__main__ import _default_action

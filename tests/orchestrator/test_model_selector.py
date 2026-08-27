@@ -116,19 +116,16 @@ async def test_start_one_provider_claude(orch: Orchestrator) -> None:
     assert "OPUS" in labels
 
 
-async def test_start_one_provider_claude_includes_1m_variants(orch: Orchestrator) -> None:
-    """/model selector surfaces SONNET[1M] + OPUS[1M] buttons for Claude (#76)."""
+async def test_start_one_provider_claude_excludes_1m_variants(orch: Orchestrator) -> None:
+    """/model selector offers FABLE but no [1M] context variants."""
     with _patch_auth(
         {"claude": _AUTHED_CLAUDE, "codex": _NOT_FOUND_CODEX, "gemini": _NOT_FOUND_GEMINI}
     ):
         resp = await model_selector_start(orch, SessionKey(chat_id=1))
     assert resp.buttons is not None
     labels = [btn.text for row in resp.buttons.rows for btn in row]
-    callbacks = [btn.callback_data for row in resp.buttons.rows for btn in row]
-    assert "SONNET[1M]" in labels
-    assert "OPUS[1M]" in labels
-    assert "ms:m:opus[1m]" in callbacks
-    assert "ms:m:sonnet[1m]" in callbacks
+    assert "FABLE" in labels
+    assert not any("[1M]" in label for label in labels)
 
 
 async def test_start_one_provider_codex(orch: Orchestrator) -> None:
@@ -223,12 +220,26 @@ async def test_callback_provider_codex_fallback(orch: Orchestrator) -> None:
 # -- handle_model_callback: model selection --
 
 
-async def test_callback_model_claude_switches(orch: Orchestrator) -> None:
-    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+async def test_callback_model_claude_shows_reasoning(orch: Orchestrator) -> None:
     resp = await handle_model_callback(orch, SessionKey(chat_id=1), "ms:m:sonnet")
+    assert "Thinking level" in resp.text
+    assert resp.buttons is not None
+    labels = [btn.text for row in resp.buttons.rows for btn in row]
+    assert labels[:4] == ["Low", "Medium", "High", "XHigh"]
+    callbacks = [btn.callback_data for row in resp.buttons.rows for btn in row]
+    assert "ms:r:xhigh:sonnet" in callbacks
+    assert "ms:b:claude" in callbacks
+    # Model is NOT switched yet — effort selection is pending.
+    assert orch._config.model != "sonnet"
+
+
+async def test_callback_claude_reasoning_switches(orch: Orchestrator) -> None:
+    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+    resp = await handle_model_callback(orch, SessionKey(chat_id=1), "ms:r:xhigh:sonnet")
     assert "sonnet" in resp.text
     assert resp.buttons is None
     assert orch._config.model == "sonnet"
+    assert orch._config.reasoning_effort == "xhigh"
 
 
 async def test_callback_model_codex_shows_reasoning(orch: Orchestrator) -> None:
@@ -300,14 +311,14 @@ async def test_switch_model_basic(orch: Orchestrator) -> None:
     mock_reset.assert_not_called()
 
 
-async def test_switch_model_opus_1m_persists(orch: Orchestrator) -> None:
-    """opus[1m] is a valid Claude alias; switch_model persists it to config (#76)."""
+async def test_switch_model_fable_persists(orch: Orchestrator) -> None:
+    """fable is a valid Claude alias; switch_model persists it to config."""
     object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
-    result = await switch_model(orch, SessionKey(chat_id=1), "opus[1m]")
-    assert "opus[1m]" in result
-    assert orch._config.model == "opus[1m]"
+    result = await switch_model(orch, SessionKey(chat_id=1), "fable")
+    assert "fable" in result
+    assert orch._config.model == "fable"
     saved = json.loads(orch.paths.config_path.read_text(encoding="utf-8"))
-    assert saved["model"] == "opus[1m]"
+    assert saved["model"] == "fable"
     assert saved["provider"] == "claude"
 
 

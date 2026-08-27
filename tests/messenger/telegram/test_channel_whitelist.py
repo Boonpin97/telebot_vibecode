@@ -290,6 +290,6 @@ class TestHotReloadChannelIds:
 
         new_cfg = _make_config(channel_ids=[channel_id])
         # Only language changed — channels must be untouched
-        tg_bot._on_auth_hot_reload(new_cfg, {"language": "de"})
+        tg_bot._on_auth_hot_reload(new_cfg, {"language": "en"})
 
         assert channel_id in tg_bot._allowed_channels

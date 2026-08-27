@@ -42,7 +42,7 @@ def _agents_path() -> Path:
     return direct
 
 
-_CLAUDE_MODELS = ("haiku", "sonnet", "opus")
+_CLAUDE_MODELS = ("haiku", "sonnet", "opus", "fable")
 
 
 def _main_home() -> Path:

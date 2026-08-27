@@ -72,7 +72,7 @@ Used by cron and webhook `cron_task` runs.
 - input: `TaskOverrides(provider, model, reasoning_effort, cli_parameters)`
 - output: immutable `TaskExecutionConfig`
 - validation:
-  - Claude model in `haiku|sonnet|opus`
+  - Claude model in `haiku|sonnet|opus|fable`
   - Codex model validated against `CodexModelCache`
   - Gemini model validated against aliases/discovered IDs or `gemini-*` patterns
 - Codex reasoning effort applied only when supported by model

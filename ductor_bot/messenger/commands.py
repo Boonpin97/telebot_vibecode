@@ -19,6 +19,7 @@ DIRECT_COMMANDS: frozenset[str] = frozenset(
         "start",
         "info",
         "agent_commands",
+        "folders",
         "showfiles",
         "session",
     }
@@ -28,6 +29,9 @@ DIRECT_COMMANDS: frozenset[str] = frozenset(
 ORCHESTRATOR_COMMANDS: frozenset[str] = frozenset(
     {
         "status",
+        "usage",
+        "credits",
+        "cmd",
         "model",
         "memory",
         "cron",

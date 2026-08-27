@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -108,6 +109,19 @@ async def test_directive_with_text(orch: Orchestrator) -> None:
     request = mock_execute.call_args[0][0]
     assert request.model_override == "sonnet"
     assert request.prompt.startswith("Hello")
+
+
+async def test_cmd_routes_to_terminal_command(orch: Orchestrator) -> None:
+    proc = SimpleNamespace(
+        communicate=AsyncMock(return_value=(b"hello\n", b"")),
+        returncode=0,
+    )
+
+    with patch("ductor_bot.orchestrator.commands.asyncio.create_subprocess_shell", return_value=proc):
+        result = await orch.handle_message(SessionKey(chat_id=1), "/cmd echo hello")
+
+    assert "Exit code: `0`" in result.text
+    assert "hello" in result.text
 
 
 # -- streaming --

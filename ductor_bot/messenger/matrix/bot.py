@@ -750,7 +750,7 @@ class MatrixBot:
             t("help.header"),
             SEP,
             f"**{t('help.cat_daily')}**\n{_line('new')}\n{_line('stop')}\n{_line('stop_all')}\n"
-            f"{_line('model')}\n{_line('status')}\n{_line('memory')}",
+            f"{_line('model')}\n{_line('status')}\n{_line('usage')}\n{_line('memory')}",
             f"**{t('help.cat_automation')}**\n{_line('session')}\n{_line('tasks')}\n{_line('cron')}",
             f"**{t('help.cat_multiagent')}**\n{_line('agent_commands')}\n{_line('agents')}\n"
             f"{_line('agent_start')}\n{_line('agent_stop')}\n{_line('agent_restart')}",
@@ -779,9 +779,10 @@ class MatrixBot:
                 on_text_delta=editor.on_delta,
                 on_tool_activity=editor.on_tool,
                 on_system_status=editor.on_system,
-            )
+        )
         self._maybe_append_footer(result)
         await editor.finalize(result.text)
+        await self._send_completion_notice(room_id, result)
 
     async def _run_non_streaming(
         self, key: SessionKey, text: str, room_id: str, event: object
@@ -798,6 +799,14 @@ class MatrixBot:
         if result.text:
             formatted = self._button_tracker.extract_and_format(room_id, result.text)
             await self._send_rich(room_id, formatted)
+        await self._send_completion_notice(room_id, result)
+
+    async def _send_completion_notice(self, room_id: str, result: object) -> None:
+        from ductor_bot.orchestrator.registry import OrchestratorResult
+
+        if not isinstance(result, OrchestratorResult) or not result.completion_notice:
+            return
+        await self._send_rich(room_id, result.completion_notice)
 
     def _is_authorized(
         self,

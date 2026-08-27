@@ -20,7 +20,7 @@ from ductor_bot.infra.inflight import InflightTurn
 from ductor_bot.log_context import set_log_context
 from ductor_bot.orchestrator.hooks import HookContext
 from ductor_bot.orchestrator.registry import OrchestratorResult
-from ductor_bot.session import SessionData, SessionKey
+from ductor_bot.session import ProviderSessionData, SessionData, SessionKey
 from ductor_bot.text.response_format import session_error_text, timeout_error_text
 from ductor_bot.workspace.loader import read_mainmemory
 
@@ -81,12 +81,14 @@ def _make_timeout_controller(orch: Orchestrator, kind: str) -> TimeoutController
     )
 
 
-async def _prepare_normal(
+async def _prepare_normal(  # noqa: PLR0913
     orch: Orchestrator,
     key: SessionKey,
     text: str,
     *,
     model_override: str | None = None,
+    reasoning_effort_override: str | None = None,
+    transient_target: bool = False,
 ) -> tuple[AgentRequest, SessionData]:
     """Shared setup for normal() and normal_streaming().
 
@@ -95,19 +97,42 @@ async def _prepare_normal(
     requested_model = model_override or orch._config.model
     req_model, req_provider = orch.resolve_runtime_target(requested_model)
 
-    session, is_new = await orch._sessions.resolve_session(
-        key,
-        provider=req_provider,
-        model=req_model,
-        preserve_existing_target=model_override is None,
-    )
-    req_model = session.model
-    req_provider = session.provider
-    await orch._sessions.sync_session_target(
-        session,
-        provider=req_provider,
-        model=req_model,
-    )
+    if transient_target:
+        base_session, _ = await orch._sessions.resolve_session(key, preserve_existing_target=True)
+        session = SessionData(
+            chat_id=base_session.chat_id,
+            transport=base_session.transport,
+            topic_id=base_session.topic_id,
+            topic_name=base_session.topic_name,
+            provider=req_provider,
+            model=req_model,
+            created_at=base_session.created_at,
+            last_active=base_session.last_active,
+            provider_sessions={
+                provider: ProviderSessionData(
+                    session_id=data.session_id,
+                    message_count=data.message_count,
+                    total_cost_usd=data.total_cost_usd,
+                    total_tokens=data.total_tokens,
+                )
+                for provider, data in base_session.provider_sessions.items()
+            },
+        )
+        is_new = not bool(session.session_id)
+    else:
+        session, is_new = await orch._sessions.resolve_session(
+            key,
+            provider=req_provider,
+            model=req_model,
+            preserve_existing_target=model_override is None,
+        )
+        req_model = session.model
+        req_provider = session.provider
+        await orch._sessions.sync_session_target(
+            session,
+            provider=req_provider,
+            model=req_model,
+        )
     if session.session_id:
         set_log_context(session_id=session.session_id)
     logger.info(
@@ -142,6 +167,8 @@ async def _prepare_normal(
         append_system_prompt=append_prompt,
         model_override=req_model,
         provider_override=req_provider,
+        reasoning_effort_override=reasoning_effort_override,
+        persist_target=not transient_target,
         chat_id=key.chat_id,
         topic_id=key.topic_id,
         transport=key.transport,
@@ -153,7 +180,11 @@ async def _prepare_normal(
 
 
 async def _update_session(
-    orch: Orchestrator, session: SessionData, response: AgentResponse
+    orch: Orchestrator,
+    session: SessionData,
+    response: AgentResponse,
+    *,
+    persist_target: bool = True,
 ) -> None:
     """Store the real CLI session_id and update metrics."""
     if response.session_id and response.session_id != session.session_id:
@@ -164,7 +195,10 @@ async def _update_session(
         )
         session.session_id = response.session_id
     await orch._sessions.update_session(
-        session, cost_usd=response.cost_usd, tokens=response.total_tokens
+        session,
+        cost_usd=response.cost_usd,
+        tokens=response.total_tokens,
+        persist_target=persist_target,
     )
 
 
@@ -207,7 +241,10 @@ async def _handle_timeout(
         )
         session.session_id = response.session_id
     await orch._sessions.update_session(
-        session, cost_usd=response.cost_usd, tokens=response.total_tokens
+        session,
+        cost_usd=response.cost_usd,
+        tokens=response.total_tokens,
+        persist_target=request.persist_target,
     )
 
     timeout_s = request.timeout_seconds or 0
@@ -267,6 +304,8 @@ class _RecoveryContext:
 
     reason: str
     model_override: str | None
+    reasoning_effort_override: str | None = None
+    transient_target: bool = False
     streaming: bool = False
     cbs: StreamingCallbacks = field(default_factory=StreamingCallbacks)
 
@@ -299,6 +338,8 @@ async def _maybe_recover_session(  # noqa: PLR0913
     response: AgentResponse,
     *,
     model_override: str | None,
+    reasoning_effort_override: str | None = None,
+    transient_target: bool = False,
     streaming: bool = False,
     cbs: StreamingCallbacks | None = None,
 ) -> _RecoveryOutcome:
@@ -329,6 +370,8 @@ async def _maybe_recover_session(  # noqa: PLR0913
     ctx = _RecoveryContext(
         reason=reason,
         model_override=model_override,
+        reasoning_effort_override=reasoning_effort_override,
+        transient_target=transient_target,
         streaming=streaming,
         cbs=cbs or StreamingCallbacks(),
     )
@@ -362,7 +405,12 @@ async def _recover_session(
     provider_name = orch.models.provider_for(model_name)
     await orch._process_registry.kill_all(key.chat_id)
     orch._process_registry.clear_abort(key.chat_id)
-    await orch._sessions.reset_provider_session(key, provider=provider_name, model=model_name)
+    await orch._sessions.reset_provider_session(
+        key,
+        provider=provider_name,
+        model=model_name,
+        persist_target=not ctx.transient_target,
+    )
 
     cb = ctx.cbs
     if ctx.reason == "invalid_session" and cb.on_text_delta is not None:
@@ -370,7 +418,14 @@ async def _recover_session(
     elif cb.on_system_status is not None:
         await cb.on_system_status("recovering")
 
-    request, session = await _prepare_normal(orch, key, text, model_override=ctx.model_override)
+    request, session = await _prepare_normal(
+        orch,
+        key,
+        text,
+        model_override=ctx.model_override,
+        reasoning_effort_override=ctx.reasoning_effort_override,
+        transient_target=ctx.transient_target,
+    )
     if ctx.streaming:
         response = await orch._cli_service.execute_streaming(
             request,
@@ -439,17 +494,26 @@ async def _gemini_missing_config_key_warning(
     return OrchestratorResult(text=t("gemini.missing_key"))
 
 
-async def normal(  # noqa: PLR0911
+async def normal(  # noqa: PLR0911, PLR0913
     orch: Orchestrator,
     key: SessionKey,
     text: str,
     *,
     model_override: str | None = None,
+    reasoning_effort_override: str | None = None,
+    transient_target: bool = False,
     is_recovery: bool = False,
 ) -> OrchestratorResult:
     """Handle normal conversation with session resume."""
     logger.info("Normal flow starting")
-    request, session = await _prepare_normal(orch, key, text, model_override=model_override)
+    request, session = await _prepare_normal(
+        orch,
+        key,
+        text,
+        model_override=model_override,
+        reasoning_effort_override=reasoning_effort_override,
+        transient_target=transient_target,
+    )
     warning = await _gemini_missing_config_key_warning(orch, request)
     if warning is not None:
         logger.warning("Gemini API-key mode without configured ductor key")
@@ -459,7 +523,15 @@ async def normal(  # noqa: PLR0911
     try:
         response = await orch._cli_service.execute(request)
         outcome = await _maybe_recover_session(
-            orch, key, text, request, session, response, model_override=model_override
+            orch,
+            key,
+            text,
+            request,
+            session,
+            response,
+            model_override=model_override,
+            reasoning_effort_override=reasoning_effort_override,
+            transient_target=transient_target,
         )
         if outcome.failed_result is not None:
             return outcome.failed_result
@@ -484,7 +556,7 @@ async def normal(  # noqa: PLR0911
                 provider_name=provider_name,
                 cli_detail=response.result,
             )
-        await _update_session(orch, session, response)
+        await _update_session(orch, session, response, persist_target=request.persist_target)
         logger.info("Normal flow completed")
         req_model, _prov = _request_target(orch, request)
         result = _finish_normal(
@@ -497,17 +569,26 @@ async def normal(  # noqa: PLR0911
         orch._inflight_tracker.complete(key.chat_id)
 
 
-async def normal_streaming(  # noqa: PLR0911
+async def normal_streaming(  # noqa: PLR0911, PLR0913
     orch: Orchestrator,
     key: SessionKey,
     text: str,
     *,
     model_override: str | None = None,
+    reasoning_effort_override: str | None = None,
+    transient_target: bool = False,
     cbs: StreamingCallbacks | None = None,
 ) -> OrchestratorResult:
     """Handle normal conversation with streaming output."""
     logger.info("Streaming flow starting")
-    request, session = await _prepare_normal(orch, key, text, model_override=model_override)
+    request, session = await _prepare_normal(
+        orch,
+        key,
+        text,
+        model_override=model_override,
+        reasoning_effort_override=reasoning_effort_override,
+        transient_target=transient_target,
+    )
     warning = await _gemini_missing_config_key_warning(orch, request)
     if warning is not None:
         logger.warning("Gemini API-key mode without configured ductor key")
@@ -537,6 +618,8 @@ async def normal_streaming(  # noqa: PLR0911
             session,
             response,
             model_override=model_override,
+            reasoning_effort_override=reasoning_effort_override,
+            transient_target=transient_target,
             streaming=True,
             cbs=cb,
         )
@@ -562,7 +645,7 @@ async def normal_streaming(  # noqa: PLR0911
                 provider_name=provider_name,
                 cli_detail=response.result,
             )
-        await _update_session(orch, session, response)
+        await _update_session(orch, session, response, persist_target=request.persist_target)
         _schedule_memory_flush(orch, key, session)
         logger.info("Streaming flow completed")
         req_model, _prov = _request_target(orch, request)
@@ -617,6 +700,7 @@ def _finish_normal(
 
     return OrchestratorResult(
         text=text,
+        completion_notice="Done",
         stream_fallback=response.stream_fallback,
         model_name=model_name,
         total_tokens=response.total_tokens,
@@ -719,7 +803,7 @@ async def named_session_flow(
         return OrchestratorResult(text=f"{tag}{t('error.generic', detail=response.result[:500])}")
 
     orch._named_sessions.update_after_response(key.chat_id, session_name, response.session_id or "")
-    return OrchestratorResult(text=f"{tag}{response.result}")
+    return OrchestratorResult(text=f"{tag}{response.result}", completion_notice="Done")
 
 
 async def named_session_streaming(
@@ -783,7 +867,7 @@ async def named_session_streaming(
         return OrchestratorResult(text=f"{tag}{t('error.generic', detail=response.result[:500])}")
 
     orch._named_sessions.update_after_response(key.chat_id, session_name, response.session_id or "")
-    return OrchestratorResult(text=f"{tag}{response.result}")
+    return OrchestratorResult(text=f"{tag}{response.result}", completion_notice="Done")
 
 
 # ---------------------------------------------------------------------------

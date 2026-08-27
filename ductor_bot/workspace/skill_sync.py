@@ -35,6 +35,7 @@ _SKIP_DIRS: frozenset[str] = frozenset(
 
 _SKILL_SYNC_INTERVAL = 30.0
 _MANAGED_MARKER = ".ductor_managed"
+_UTF8_BOM = b"\xef\xbb\xbf"
 
 
 def _is_under(child: Path, parent: Path) -> bool:
@@ -234,6 +235,37 @@ def _clean_broken_links(directory: Path) -> int:
     return removed
 
 
+def _strip_skill_md_bom(skill_dir: Path) -> bool:
+    """Remove a UTF-8 BOM from ``SKILL.md`` in *skill_dir* when present."""
+    skill_md = skill_dir / "SKILL.md"
+    try:
+        data = skill_md.read_bytes()
+    except OSError:
+        return False
+    if not data.startswith(_UTF8_BOM):
+        return False
+    try:
+        skill_md.write_bytes(data[len(_UTF8_BOM) :])
+    except OSError:
+        logger.warning("Failed to normalize BOM in %s", skill_md, exc_info=True)
+        return False
+    logger.info("Removed UTF-8 BOM from %s", skill_md)
+    return True
+
+
+def _normalize_ductor_skill_files(skills_dir: Path) -> int:
+    """Normalize ductor-owned ``SKILL.md`` files for downstream CLI loaders."""
+    if not skills_dir.is_dir():
+        return 0
+    normalized = 0
+    for entry in sorted(skills_dir.iterdir()):
+        if entry.name.startswith(".") or entry.name in _SKIP_DIRS or not entry.is_dir():
+            continue
+        if _strip_skill_md_bom(entry):
+            normalized += 1
+    return normalized
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -303,6 +335,10 @@ def sync_skills(paths: DuctorPaths, *, docker_active: bool = False) -> None:
     - Existing valid symlinks pointing elsewhere are left alone.
     - Internal directories (.system, .claude, .git, .venv) are skipped.
     """
+    normalized = _normalize_ductor_skill_files(paths.skills_dir)
+    if normalized:
+        logger.info("Normalized %d ductor skill file(s)", normalized)
+
     cli_dirs = _cli_skill_dirs()
     all_dirs: dict[str, Path] = {"ductor": paths.skills_dir, **cli_dirs}
 

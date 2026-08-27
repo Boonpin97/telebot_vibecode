@@ -19,6 +19,7 @@ from ductor_bot.config import (
     NotificationsConfig,
     NotificationTarget,
 )
+from ductor_bot.orchestrator.registry import OrchestratorResult
 
 
 def _make_bot(
@@ -69,6 +70,19 @@ async def test_notify_startup_falls_back_when_no_targets() -> None:
 
     notify_all.assert_awaited_once_with("hello")
     notify.assert_not_called()
+
+
+async def test_completion_notice_sends_separate_message() -> None:
+    bot, _, _, _ = _make_bot()
+    send_rich = AsyncMock()
+    bot._send_rich = send_rich
+
+    await bot._send_completion_notice(
+        "!room:test",
+        OrchestratorResult(text="patched", completion_notice="Done"),
+    )
+
+    send_rich.assert_awaited_once_with("!room:test", "Done")
 
 
 async def test_notify_startup_uses_configured_targets() -> None:

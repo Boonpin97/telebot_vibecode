@@ -26,6 +26,7 @@ class OrchestratorResult(BaseModel):
     """Structured return from handle_message."""
 
     text: str
+    completion_notice: str | None = None
     stream_fallback: bool = False
     buttons: ButtonGrid | None = None
     model_name: str | None = None

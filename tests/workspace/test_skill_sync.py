@@ -19,7 +19,9 @@ from ductor_bot.workspace.skill_sync import (
     _ensure_link,
     _is_managed_copy,
     _is_under,
+    _normalize_ductor_skill_files,
     _resolve_canonical,
+    _strip_skill_md_bom,
     cleanup_ductor_links,
     sync_bundled_skills,
     sync_skills,
@@ -224,6 +226,20 @@ def test_clean_nonexistent_dir(tmp_path: Path) -> None:
     assert _clean_broken_links(tmp_path / "nope") == 0
 
 
+def test_strip_skill_md_bom(tmp_path: Path) -> None:
+    skill = _make_skill(tmp_path / "skills", "bom-skill")
+    skill_md = skill / "SKILL.md"
+    skill_md.write_bytes(b"\xef\xbb\xbf---\nname: bom-skill\n---\n")
+    assert _strip_skill_md_bom(skill) is True
+    assert skill_md.read_bytes() == b"---\nname: bom-skill\n---\n"
+
+
+def test_normalize_ductor_skill_files_skips_non_bom(tmp_path: Path) -> None:
+    skills_dir = tmp_path / "skills"
+    _make_skill(skills_dir, "plain-skill")
+    assert _normalize_ductor_skill_files(skills_dir) == 0
+
+
 # ---------------------------------------------------------------------------
 # Group 5: sync_skills (full integration)
 # ---------------------------------------------------------------------------
@@ -321,6 +337,18 @@ def test_sync_no_providers(tmp_path: Path) -> None:
         mock.return_value = {}
         sync_skills(paths)
     assert (paths.skills_dir / "lonely").is_dir()
+
+
+def test_sync_strips_bom_from_ductor_skill(tmp_path: Path) -> None:
+    paths = _make_paths(tmp_path)
+    paths.skills_dir.mkdir(parents=True)
+    skill = _make_skill(paths.skills_dir, "bom-skill")
+    skill_md = skill / "SKILL.md"
+    skill_md.write_bytes(b"\xef\xbb\xbf---\nname: bom-skill\n---\n")
+    with patch("ductor_bot.workspace.skill_sync._cli_skill_dirs") as mock:
+        mock.return_value = {}
+        sync_skills(paths)
+    assert skill_md.read_bytes() == b"---\nname: bom-skill\n---\n"
 
 
 def test_sync_preserves_real_dirs(tmp_path: Path) -> None:

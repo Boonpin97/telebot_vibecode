@@ -385,6 +385,8 @@ class SessionManager:
         key: SessionKey,
         provider: str,
         model: str,
+        *,
+        persist_target: bool = True,
     ) -> SessionData:
         """Reset only one provider-local session and keep all others intact."""
         sessions = await self._load()
@@ -401,8 +403,9 @@ class SessionManager:
             )
         else:
             current.clear_provider_session(provider)
-            current.provider = provider
-            current.model = model
+            if persist_target:
+                current.provider = provider
+                current.model = model
             current.last_active = datetime.now(UTC).isoformat()
         sessions[skey] = current
         await self._save(sessions)
@@ -414,6 +417,8 @@ class SessionManager:
         session: SessionData,
         cost_usd: float = 0.0,
         tokens: int = 0,
+        *,
+        persist_target: bool = True,
     ) -> None:
         """Update session metrics and persist.
 
@@ -430,26 +435,37 @@ class SessionManager:
                 # Apply mutable identity fields from caller, but keep counters
                 # from the latest persisted record to avoid stale overwrites.
                 self._merge_provider_sessions(current, session)
-                current.provider = session.provider
-                current.model = session.model
+                if persist_target:
+                    current.provider = session.provider
+                    current.model = session.model
                 if session.topic_name and not current.topic_name:
                     current.topic_name = session.topic_name
 
             current.last_active = datetime.now(UTC).isoformat()
-            current.message_count += 1
-            current.total_cost_usd += cost_usd
-            current.total_tokens += tokens
+            target_provider = session.provider if not persist_target else current.provider
+            provider_data = current.provider_sessions.get(target_provider)
+            if provider_data is None:
+                provider_data = ProviderSessionData()
+                current.provider_sessions[target_provider] = provider_data
+            provider_data.message_count += 1
+            provider_data.total_cost_usd += cost_usd
+            provider_data.total_tokens += tokens
             sessions[key] = current
             await self._save(sessions)
 
             # Keep caller reference in sync with persisted aggregate values.
-            session.provider = current.provider
-            session.model = current.model
+            if persist_target:
+                session.provider = current.provider
+                session.model = current.model
             session.last_active = current.last_active
             session.provider_sessions = self._clone_provider_sessions(current.provider_sessions)
-            session.message_count = current.message_count
-            session.total_cost_usd = current.total_cost_usd
-            session.total_tokens = current.total_tokens
+            current_data = current.provider_sessions.get(session.provider)
+            if current_data is None:
+                current_data = ProviderSessionData()
+                current.provider_sessions[session.provider] = current_data
+            session.message_count = current_data.message_count
+            session.total_cost_usd = current_data.total_cost_usd
+            session.total_tokens = current_data.total_tokens
 
     @staticmethod
     def _clone_provider_sessions(

@@ -150,6 +150,23 @@ def _format_reasoning_chunk(text: str) -> str:
     return f"**Thinking**\n\n{normalized}"
 
 
+async def _send_completion_notice(
+    bot: Bot,
+    chat_id: int,
+    result: OrchestratorResult,
+    *,
+    thread_id: int | None = None,
+) -> None:
+    if not result.completion_notice:
+        return
+    await send_rich(
+        bot,
+        chat_id,
+        result.completion_notice,
+        SendRichOpts(thread_id=thread_id),
+    )
+
+
 @dataclass(slots=True)
 class NonStreamingDispatch:
     """Input payload for one non-streaming message turn.
@@ -221,6 +238,12 @@ async def run_non_streaming_message(
                 allowed_roots=dispatch.allowed_roots,
                 thread_id=dispatch.thread_id,
             ),
+        )
+        await _send_completion_notice(
+            dispatch.bot,
+            dispatch.key.chat_id,
+            result,
+            thread_id=dispatch.thread_id,
         )
         return result.text
     finally:
@@ -386,6 +409,12 @@ async def run_streaming_message(  # noqa: C901, PLR0915
                 thread_id=dispatch.thread_id,
             )
 
+        await _send_completion_notice(
+            dispatch.bot,
+            dispatch.key.chat_id,
+            result,
+            thread_id=dispatch.thread_id,
+        )
         return result.text
     finally:
         await tracker.clear()

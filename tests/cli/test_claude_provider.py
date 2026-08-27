@@ -166,6 +166,22 @@ class TestBuildCommand:
         idx = cmd.index("--model")
         assert cmd[idx + 1] == model
 
+    @pytest.mark.parametrize("effort", ["low", "medium", "high", "xhigh", "max"])
+    def test_reasoning_effort_flag(self, monkeypatch: pytest.MonkeyPatch, effort: str) -> None:
+        cli = _make_cli(monkeypatch, reasoning_effort=effort)
+        cmd = cli._build_command("hi")
+        idx = cmd.index("--effort")
+        assert cmd[idx + 1] == effort
+
+    @pytest.mark.parametrize("effort", ["", "default", "ultra"])
+    def test_invalid_reasoning_effort_omitted(
+        self, monkeypatch: pytest.MonkeyPatch, effort: str
+    ) -> None:
+        """Unknown effort values are dropped rather than passed to the CLI."""
+        cli = _make_cli(monkeypatch, reasoning_effort=effort)
+        cmd = cli._build_command("hi")
+        assert "--effort" not in cmd
+
     def test_prompt_is_always_last(self, monkeypatch: pytest.MonkeyPatch) -> None:
         cli = _make_cli(
             monkeypatch,

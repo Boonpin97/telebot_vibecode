@@ -117,7 +117,7 @@ async def test_sigkill_still_auto_recovers(orch: Orchestrator) -> None:
     assert result.text == "Recovered"
     assert mock_execute.call_count == 2
     mock_reset_provider.assert_called_once_with(
-        SessionKey(chat_id=1), provider="claude", model="opus"
+        SessionKey(chat_id=1), provider="claude", model="opus", persist_target=True
     )
 
 

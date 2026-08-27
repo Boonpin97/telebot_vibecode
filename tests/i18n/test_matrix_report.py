@@ -215,7 +215,7 @@ def test_main_returns_one_on_gaps(tmp_path: Path) -> None:
     # the fact that only 'de' exists here (others yield empty dicts -> all keys
     # reported missing for every other language). We still expect rc=1.
     buf = io.StringIO()
-    rc = main(argv=["--root", str(tmp_path)], out=buf)
+    rc = main(argv=["--root", str(tmp_path), "--locale", "de"], out=buf)
     assert rc == 1
 
 
@@ -225,7 +225,7 @@ def test_main_quiet_suppresses_output(tmp_path: Path) -> None:
     # Only de present; others will be reported as fully missing but we don't care
     # here — we're asserting that --quiet suppresses stdout.
     buf = io.StringIO()
-    main(argv=["--root", str(tmp_path), "--quiet"], out=buf)
+    main(argv=["--root", str(tmp_path), "--locale", "de", "--quiet"], out=buf)
     assert buf.getvalue() == ""
 
 

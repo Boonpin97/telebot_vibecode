@@ -516,7 +516,7 @@ Restart classification is computed from `AgentConfig` top-level schema fields.
 
 `ModelRegistry` (`ductor_bot/config.py`):
 
-- Claude models are hardcoded: `haiku`, `sonnet`, `opus`, plus the 1M-context variants `sonnet[1m]` and `opus[1m]` (Claude CLI strips the `[1m]` suffix and sets the 1M-context beta header internally).
+- Claude models are hardcoded: `haiku`, `sonnet`, `opus`, `fable`.
 - Gemini aliases are hardcoded: `auto`, `pro`, `flash`, `flash-lite`.
 - Runtime Gemini models are discovered from local Gemini CLI files at startup.
 - Provider resolution (`provider_for(model_id)`):

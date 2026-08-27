@@ -52,6 +52,8 @@ class AgentRequest:
     append_system_prompt: str | None = None
     model_override: str | None = None
     provider_override: str | None = None
+    reasoning_effort_override: str | None = None
+    persist_target: bool = True
     chat_id: int = 0
     topic_id: int | None = None
     transport: str = "tg"

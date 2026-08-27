@@ -6,6 +6,7 @@ using English as the source of truth.
 Usage:
     python -m ductor_bot.i18n.check
     python -m ductor_bot.i18n.check --root /path/to/i18n
+    python -m ductor_bot.i18n.check --locale de
     python -m ductor_bot.i18n.check --quiet  # exit-code only, no output
 
 Exit codes:
@@ -221,11 +222,17 @@ def main(argv: list[str] | None = None, out: TextIO | None = None) -> int:
         action="store_true",
         help="Suppress output; use exit code only.",
     )
+    parser.add_argument(
+        "--locale",
+        action="append",
+        dest="locales",
+        help="Specific non-English locale to check. May be passed multiple times.",
+    )
     args = parser.parse_args(argv)
     stream = out if out is not None else sys.stdout
 
     try:
-        report = build_report(root=args.root)
+        report = build_report(root=args.root, locales=args.locales)
     except FileNotFoundError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

@@ -29,6 +29,9 @@ def _is_process_alive(pid: int) -> bool:
         return False
     except PermissionError:
         return True
+    except SystemError:
+        # Windows can surface invalid/stale PID probes as SystemError from os.kill.
+        return False
     except OSError:
         # Windows raises various OSError subclasses for invalid/stale PIDs.
         return False

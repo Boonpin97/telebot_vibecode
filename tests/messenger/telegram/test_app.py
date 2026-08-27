@@ -310,6 +310,44 @@ class TestOnHelp:
         opts = mock_send.call_args[0][3]
         assert opts.reply_to_message_id == msg.message_id
 
+    def test_home_folder_listing_excludes_hidden_and_files(self, tmp_path: Path) -> None:
+        from ductor_bot.messenger.telegram.app import _list_visible_home_directories
+
+        (tmp_path / "Projects").mkdir()
+        (tmp_path / "downloads").mkdir()
+        (tmp_path / ".ssh").mkdir()
+        (tmp_path / "notes.txt").write_text("not a directory")
+
+        assert _list_visible_home_directories(tmp_path) == ["downloads", "Projects"]
+
+    def test_home_folders_text_lists_visible_directories(self, tmp_path: Path) -> None:
+        from ductor_bot.messenger.telegram.app import _build_home_folders_text
+
+        (tmp_path / "Projects").mkdir()
+        (tmp_path / ".cache").mkdir()
+
+        text = _build_home_folders_text(tmp_path)
+
+        assert "Home folders" in text
+        assert "`Projects/`" in text
+        assert ".cache" not in text
+
+    @patch("ductor_bot.messenger.telegram.app.send_rich", new_callable=AsyncMock)
+    async def test_folders_command_sends_home_folder_listing(self, mock_send: AsyncMock) -> None:
+        tg_bot, bot_instance = _make_tg_bot()
+        msg = _make_message(chat_id=42)
+
+        with patch(
+            "ductor_bot.messenger.telegram.app._build_home_folders_text",
+            return_value="Home folders\n\n- `Projects/`",
+        ):
+            await tg_bot._on_folders(msg)
+
+        mock_send.assert_called_once()
+        assert mock_send.call_args[0][0] is bot_instance
+        assert mock_send.call_args[0][1] == 42
+        assert "Projects" in mock_send.call_args[0][2]
+
 
 # ---------------------------------------------------------------------------
 # _on_start / _show_welcome

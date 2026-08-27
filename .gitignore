@@ -59,3 +59,23 @@ python_best_practice.md
 run.py
 .planning/
 graphify-out/
+
+# Local machine notes (never commit - may contain paths, accounts, hostnames)
+PATH_AND_ACCOUNTS.MD
+LOCAL_NOTES.md
+*.local.md
+
+# Runtime state / credentials (belong in ~/.ductor, never in the repo)
+config.json
+sessions.json
+named_sessions.json
+tasks.json
+cron_jobs.json
+webhooks.json
+agents.json
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+service-account*.json

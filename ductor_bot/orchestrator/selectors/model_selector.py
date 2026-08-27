@@ -305,8 +305,8 @@ async def switch_model(  # noqa: C901
             agents_path = orch.paths.ductor_home.parent.parent / "agents.json"
             agent_name = orch._cli_service._config.agent_name
             registry_updates = dict(updates)
-            # Only Codex uses reasoning_effort — remove it when switching away
-            if new_provider != "codex" and "reasoning_effort" not in registry_updates:
+            # Claude and Codex use reasoning_effort — remove it for Gemini
+            if new_provider == "gemini" and "reasoning_effort" not in registry_updates:
                 registry_updates["reasoning_effort"] = None
             await asyncio.to_thread(
                 update_agent_fields, agents_path, agent_name, **registry_updates
@@ -349,7 +349,7 @@ async def _status_line(orch: Orchestrator, key: SessionKey) -> str:
 
     effort = orch._config.reasoning_effort
 
-    if provider == "codex":
+    if provider in ("claude", "codex"):
         current = (
             f"{t('model.header')}\n{t('model.current_with_effort', model=model, effort=effort)}"
         )
@@ -423,16 +423,19 @@ async def _handle_model_selected(
     model_id: str,
     codex_cache: CodexModelCache | None = None,
 ) -> SelectorResponse:
-    """Handle a model button press. Claude/Gemini: switch immediately. Codex: show reasoning."""
+    """Handle a model button press. Gemini: switch immediately. Claude/Codex: show reasoning."""
     provider = orch.models.provider_for(model_id)
 
-    if provider in ("claude", "gemini"):
+    if provider == "gemini":
         result = await switch_model(orch, key, model_id)
         return SelectorResponse(text=result)
 
-    # Use cache instead of live discovery
-    codex_info = codex_cache.get_model(model_id) if codex_cache else None
-    efforts = codex_info.supported_efforts if codex_info else ("low", "medium", "high", "xhigh")
+    if provider == "claude":
+        efforts: tuple[str, ...] = ("low", "medium", "high", "xhigh")
+    else:
+        # Use cache instead of live discovery
+        codex_info = codex_cache.get_model(model_id) if codex_cache else None
+        efforts = codex_info.supported_efforts if codex_info else ("low", "medium", "high", "xhigh")
 
     buttons = [
         Button(
@@ -444,7 +447,7 @@ async def _handle_model_selected(
     keyboard = ButtonGrid(
         rows=[
             buttons,
-            [Button(text=t("model.btn_back"), callback_data="ms:b:codex")],
+            [Button(text=t("model.btn_back"), callback_data=f"ms:b:{provider}")],
         ]
     )
 

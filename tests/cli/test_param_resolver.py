@@ -69,7 +69,7 @@ def test_resolve_global_only(base_config: AgentConfig, codex_cache: CodexModelCa
 
     assert result.provider == "claude"
     assert result.model == "sonnet"
-    assert result.reasoning_effort == ""
+    assert result.reasoning_effort == "medium"
     assert result.cli_parameters == []
     assert result.permission_mode == "normal"
     assert result.working_dir == "~/ductor"
@@ -160,18 +160,30 @@ def test_resolve_codex_effort_fallback(
         resolve_cli_config(base_config, codex_cache, task_overrides=overrides)
 
 
-def test_resolve_claude_ignores_reasoning(
+def test_resolve_claude_reasoning_effort(
     base_config: AgentConfig, codex_cache: CodexModelCache
 ) -> None:
-    """Should ignore reasoning_effort for Claude provider."""
+    """Should honor reasoning_effort overrides for Claude provider."""
     overrides = TaskOverrides(
-        reasoning_effort="high",  # Should be ignored for Claude
+        reasoning_effort="high",
     )
 
     result = resolve_cli_config(base_config, codex_cache, task_overrides=overrides)
 
     assert result.provider == "claude"
-    assert result.reasoning_effort == ""
+    assert result.reasoning_effort == "high"
+
+
+def test_resolve_claude_invalid_reasoning_effort(
+    base_config: AgentConfig, codex_cache: CodexModelCache
+) -> None:
+    """Should reject an unsupported reasoning_effort override for Claude."""
+    overrides = TaskOverrides(
+        reasoning_effort="ultra",
+    )
+
+    with pytest.raises(DuctorError, match="Invalid reasoning effort"):
+        resolve_cli_config(base_config, codex_cache, task_overrides=overrides)
 
 
 def test_resolve_gemini_model_from_discovery(

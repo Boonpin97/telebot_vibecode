@@ -29,6 +29,12 @@ class TestIsProcessAlive:
         with patch("os.kill", side_effect=PermissionError):
             assert _is_process_alive(999) is True
 
+    def test_system_error_means_dead(self) -> None:
+        from ductor_bot.infra.pidlock import _is_process_alive
+
+        with patch("os.kill", side_effect=SystemError):
+            assert _is_process_alive(999) is False
+
 
 class TestAcquireLock:
     """Test PID lock acquisition."""

@@ -8,6 +8,7 @@ import os
 import signal
 import subprocess
 import sys
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -175,12 +176,18 @@ def _kill_ductor_exe_windows(current_pid: int) -> int:
 
 
 def _kill_venv_python_windows(current_pid: int) -> int:
-    r"""Kill ``python.exe``/``pythonw.exe`` processes running from the pipx venv.
+    r"""Kill ``python.exe``/``pythonw.exe`` processes running from ductor venvs.
 
     When ductor is installed via ``pipx``, the bot runs as
     ``pythonw.exe -m ductor_bot`` inside ``~\pipx\venvs\ductor\``.
-    These processes lock the venv executables and prevent ``pipx install --force``.
+    In local dev installs, the bot may also run from the active ``.venv\Scripts``
+    directory. These processes can survive a scheduler stop briefly and block a
+    clean restart by holding the internal API port.
     """
+    scripts_dir = str(Path(sys.executable).resolve().parent).lower()
+    current_python = str(Path(sys.executable).resolve()).lower()
+    current_pythonw = str(Path(sys.executable).resolve().with_name("pythonw.exe")).lower()
+
     try:
         result = subprocess.run(
             [
@@ -189,7 +196,11 @@ def _kill_venv_python_windows(current_pid: int) -> int:
                 "-Command",
                 (
                     "Get-Process python,pythonw -ErrorAction SilentlyContinue"
-                    " | Where-Object { $_.Path -like '*pipx*ductor*' }"
+                    f" | Where-Object {{ $_.Path -and ("
+                    f"$_.Path.ToLower() -eq '{current_python}' -or "
+                    f"$_.Path.ToLower() -eq '{current_pythonw}' -or "
+                    f"$_.Path.ToLower().StartsWith('{scripts_dir}') -or "
+                    "$_.Path -like '*pipx*ductor*' ) }"
                     " | Select-Object -ExpandProperty Id"
                 ),
             ],

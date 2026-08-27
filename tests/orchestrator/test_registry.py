@@ -17,6 +17,7 @@ def registry() -> CommandRegistry:
 def test_orchestrator_result_defaults() -> None:
     r = OrchestratorResult(text="hello")
     assert r.text == "hello"
+    assert r.completion_notice is None
     assert r.stream_fallback is False
 
 

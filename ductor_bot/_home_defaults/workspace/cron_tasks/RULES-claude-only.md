@@ -8,7 +8,7 @@ For cron tool commands (add/edit/remove/list), see `tools/cron_tools/CLAUDE.md`.
 **CRITICAL: When creating a new cron job, you MUST ALWAYS ask the user these questions:**
 
 1. **Which model?** (`--model <name>`)
-   - Options: `haiku` (fast), `sonnet` (balanced), `opus` (most capable)
+   - Options: `haiku` (fast), `sonnet` (balanced), `opus` (most capable), `fable` (newest frontier)
    - Default if user doesn't specify: Use global config model
 
 **YOU MUST present these options to the user and wait for their answers BEFORE calling cron_add.py!**
@@ -27,6 +27,7 @@ You: "I'll create a cron job to check weather every 3 minutes. Let me configure 
    - `haiku` (fast and cost-effective)
    - `sonnet` (balanced performance)
    - `opus` (most capable, highest quality)
+   - `fable` (newest frontier model)
 
 Please specify your choice, or I'll use the global config default."
 
@@ -64,7 +65,7 @@ While creating/editing cron or webhook-triggered tasks, update
 Each cron task can override global config settings in `cron_jobs.json`:
 
 - `model`: Model name (optional, defaults to global config)
-  - Available: `"haiku"`, `"sonnet"`, `"opus"`
+  - Available: `"haiku"`, `"sonnet"`, `"opus"`, `"fable"`
 - `cli_parameters`: List of additional CLI flags (optional, advanced users only)
 
 **Fallback behavior:**

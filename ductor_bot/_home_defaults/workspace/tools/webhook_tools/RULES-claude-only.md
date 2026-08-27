@@ -10,6 +10,7 @@ Scripts for managing incoming HTTP webhook endpoints.
    - `haiku` - Fast and cost-effective
    - `sonnet` - Balanced performance (recommended)
    - `opus` - Most capable, highest quality
+   - `fable` - Newest frontier model
 
 2. **Should this webhook respect quiet hours?**
    - Ask: "Should this webhook skip execution during specific hours (e.g., at night)?"
@@ -115,7 +116,7 @@ python3 tools/webhook_tools/webhook_add.py \
 ```
 
 **Available parameters for cron_task mode:**
-- `--model` - Model choice: `haiku`, `sonnet`, `opus` (optional)
+- `--model` - Model choice: `haiku`, `sonnet`, `opus`, `fable` (optional)
 - `--cli-parameters` - Advanced: JSON array (only if user explicitly requests)
 
 ### List
@@ -212,7 +213,7 @@ silently with inferred user workflow preferences and interests.
 Webhooks in `cron_task` mode can override global config settings in `webhooks.json`:
 
 - `model`: Model name (optional, defaults to global config)
-  - Available: `"haiku"`, `"sonnet"`, `"opus"`
+  - Available: `"haiku"`, `"sonnet"`, `"opus"`, `"fable"`
 - `cli_parameters`: List of additional CLI flags (optional, e.g., `["--chrome"]`)
 
 **Fallback behavior:**
