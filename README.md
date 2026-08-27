@@ -15,6 +15,7 @@
 
 <p align="center">
   <a href="#quick-start">Quick start</a> &middot;
+  <a href="#setup-guide">Setup guide</a> &middot;
   <a href="#how-chats-work">How chats work</a> &middot;
   <a href="#commands">Commands</a> &middot;
   <a href="docs/README.md">Docs</a> &middot;
@@ -34,21 +35,224 @@ ductor runs on your machine and sends simple console commands as if you were typ
 
 ## Quick start
 
+This repository is a **fork of [ductor](https://github.com/PleasePrompto/ductor)**, run
+from source. Install it from this clone — not from PyPI, since `pipx install ductor`
+would fetch upstream instead of this fork:
+
 ```bash
-pipx install ductor    # or: uv tool install ductor
+git clone https://github.com/Boonpin97/telebot_vibecode.git
+cd telebot_vibecode
+
+python -m venv .venv
+source .venv/bin/activate        # Windows: .\.venv\Scripts\Activate.ps1
+
+pip install -e ".[dev]"
 ductor
 ```
 
-The onboarding wizard handles CLI checks, transport setup (Telegram or Matrix), timezone, optional Docker, and optional background service install.
+Running `ductor` with no config starts the onboarding wizard automatically.
 
-**Requirements:** Python 3.11+, at least one CLI installed (`claude`, `codex`, or `gemini`), and either:
+**Before you start, you need all three of these:**
 
-- a Telegram Bot Token from [@BotFather](https://t.me/BotFather), or
-- a Matrix account on a homeserver (homeserver URL, user ID, password/access token)
+1. Python 3.11+ and git
+2. At least one provider CLI **installed and logged in** (`claude`, `codex`, or `gemini`)
+3. A Telegram bot token and your numeric Telegram user ID
 
-For Matrix support: `ductor install matrix` — see [Matrix setup guide](docs/matrix-setup.md).
+The wizard **refuses to continue if no provider CLI is authenticated**, so get a CLI
+logged in before running it. The full walkthrough is below.
 
-Detailed setup: [`docs/installation.md`](docs/installation.md)
+## Setup guide
+
+### Step 1 — Install and authenticate a provider CLI
+
+ductor drives the official CLIs as subprocesses; it never proxies an API. You need at
+least one of these working on its own first:
+
+```bash
+npm install -g @anthropic-ai/claude-code && claude auth   # Claude Code
+npm install -g @openai/codex && codex auth                # Codex CLI
+npm install -g @google/gemini-cli                         # Gemini CLI (authenticate inside `gemini`)
+```
+
+Verify before continuing — run `claude`, `codex`, or `gemini` once and confirm it
+answers a prompt without asking you to log in.
+
+<details>
+<summary>How ductor detects that you are authenticated</summary>
+
+The wizard checks each provider in this order and reports ✓ / ✗ per CLI:
+
+| Provider | Counts as authenticated when |
+|---|---|
+| **claude** | `~/.claude/.credentials.json` exists, **or** `ANTHROPIC_API_KEY` is set, **or** `claude auth status` reports `loggedIn` |
+| **codex** | `~/.codex/auth.json` exists (or `$CODEX_HOME/auth.json`), **or** `OPENAI_API_KEY` is set |
+| **gemini** | `~/.gemini/oauth_creds.json` exists, **or** a Gemini API key is present in the environment or Gemini settings |
+
+If none of them pass, onboarding stops with a red panel. That is expected — go install
+or log into a CLI, then re-run `ductor`.
+
+</details>
+
+### Step 2 — Create your Telegram bot
+
+1. Open Telegram and message [**@BotFather**](https://t.me/BotFather)
+2. Send `/newbot`
+3. Choose a display name (e.g. `My Coding Agent`)
+4. Choose a username ending in `bot` (e.g. `my_coding_agent_bot`)
+5. BotFather replies with a token — copy it
+
+The token looks like `1234567890:ABCdefGHIjklMNOpqrsTUVwxyz`. Onboarding validates it
+against `^\d{8,}:[A-Za-z0-9_-]{30,}$` — at least 8 digits, a colon, then 30+ letters,
+digits, `-` or `_` — and re-prompts until it matches.
+
+> **Keep this token secret.** It is full control of your bot. It is stored in
+> `~/.ductor/config/config.json`, never in this repository. If it leaks, send
+> `/revoke` to BotFather to invalidate it.
+
+### Step 3 — Find your Telegram user ID
+
+1. Message [**@userinfobot**](https://t.me/userinfobot)
+2. Send `/start`
+3. It replies with your numeric ID (e.g. `123456789`)
+
+This becomes your `allowed_user_ids`. **Only this user can talk to the bot** — anyone
+else who finds it is ignored. This is the entire access-control model, so get it right.
+
+### Step 4 — Install from this clone
+
+```bash
+git clone https://github.com/Boonpin97/telebot_vibecode.git
+cd telebot_vibecode
+
+python -m venv .venv
+source .venv/bin/activate        # Windows: .\.venv\Scripts\Activate.ps1
+
+python -m pip install --upgrade pip
+pip install -e ".[dev]"
+```
+
+`.[dev]` pulls in the Matrix and API extras plus test/lint tooling. For a minimal
+Telegram-only install, use `pip install -e .` instead.
+
+On Windows you can skip activating the venv and use the bundled launcher, which resolves
+its own path and forces UTF-8 output:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run-ductor.ps1
+```
+
+### Step 5 — Run onboarding
+
+```bash
+ductor
+```
+
+The wizard walks through, in order:
+
+1. Provider CLI auth check (aborts if nothing is authenticated)
+2. Risk disclaimer — you must accept it
+3. Transport choice — **Telegram** or **Matrix**
+4. Your bot token, then your numeric user ID
+5. Docker sandbox — optional, safe to decline for now
+6. Optional sandbox packages, only if you enabled Docker
+7. Timezone
+8. Optional background service install
+
+Re-run it any time with `ductor onboarding`.
+
+### Step 6 — Talk to your bot
+
+Start the bot if it is not already running:
+
+```bash
+ductor
+```
+
+Then open Telegram, find your bot by the username you chose, and send `/start`. Try
+`/status` to confirm the provider and session are live, then send an ordinary message —
+it goes to the CLI as a prompt.
+
+### Step 7 — Run it in the background (optional)
+
+```bash
+ductor service install    # Linux: systemd user unit | macOS: launchd | Windows: Task Scheduler
+ductor service status
+ductor service logs
+```
+
+On Windows the bundled helper does install and start in one go:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-ductor-service.ps1
+```
+
+### Where your settings live
+
+Nothing you configure is written into this repository. Everything lands under `~/.ductor`
+(`C:\Users\<you>\.ductor` on Windows):
+
+| File | Holds |
+|---|---|
+| `config/config.json` | Bot token, `allowed_user_ids`, provider, model, timezone |
+| `.env` | Extra API keys passed through to the CLIs — you create this by hand |
+| `sessions.json` | Per-chat conversation state |
+| `logs/agent.log` | Runtime log |
+| `workspace/` | Agent working directory |
+
+See [`config.example.json`](config.example.json) for every option with placeholder
+values. Because the whole config lives outside the repo, a fresh clone is safe to
+publish and safe to hand to someone else.
+
+### Adding a group chat (optional)
+
+Private chats work with just your user ID. To use the bot in a group, add the group's ID
+to `allowed_group_ids` in `config.json` — both the group **and** the user must be
+allowlisted for a message to pass.
+
+Telegram bots also have Privacy Mode on by default, so the bot only sees `/commands` in
+groups. To let it read all messages, make it a group admin, or disable Privacy Mode via
+BotFather (`/setprivacy` → Disable). If you change this after adding the bot, remove and
+re-add it.
+
+`allowed_user_ids`, `allowed_group_ids`, and `group_mention_only` are hot-reloaded —
+edit `config.json` and the change takes effect within seconds, no restart needed.
+
+### Updating your clone
+
+This is a source install, so `ductor upgrade` does **not** self-update — it will tell you
+to use git instead:
+
+```bash
+git pull
+pip install -e ".[dev]"    # only needed when dependencies changed
+ductor restart
+```
+
+### Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| Wizard aborts with a red CLI panel | No provider CLI is authenticated — complete Step 1, then re-run `ductor` |
+| `Invalid token format` | Token must be `digits:30+ chars`; re-copy it from BotFather without surrounding spaces |
+| Bot ignores your messages | Your user ID is not in `allowed_user_ids` — check `config.json`, or re-run `ductor onboarding` |
+| Bot silent in a group | Group not in `allowed_group_ids`, or Privacy Mode is hiding messages (see above) |
+| `ductor` not found | The venv is not active — activate it, or use `.\run-ductor.ps1` on Windows |
+| Garbled output on Windows | Use `run-ductor.ps1`, which sets `PYTHONUTF8=1` |
+| Want a clean slate | `ductor reset` deletes `~/.ductor` (after a confirmation prompt) and re-runs onboarding; it never touches the repo |
+
+Check `ductor status` for runtime state and `~/.ductor/logs/agent.log` for detail.
+
+### Matrix instead of Telegram
+
+Matrix is a first-class alternative transport. Install the extra and follow the
+dedicated guide:
+
+```bash
+ductor install matrix
+```
+
+See the [Matrix setup guide](docs/matrix-setup.md). Upstream's full installation
+reference is in [`docs/installation.md`](docs/installation.md).
 
 ## How chats work
 
